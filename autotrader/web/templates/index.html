@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}Search - AutoTrader Deal Finder{% endblock %}
+
+{% block content %}
+<div class="search-form">
+    <h2>Search Scraped Listings</h2>
+    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 16px;">
+        Filter and browse listings that have been scraped. Use the CLI to run new scrapes.
+    </p>
+
+    <form action="/results" method="get">
+        <div class="form-grid">
+            <div class="form-group">
+                <label for="make">Make</label>
+                <input type="text" id="make" name="make" placeholder="e.g. BMW">
+            </div>
+            <div class="form-group">
+                <label for="model">Model</label>
+                <input type="text" id="model" name="model" placeholder="e.g. 3 Series">
+            </div>
+            <div class="form-group">
+                <label for="year_from">Year From</label>
+                <input type="number" id="year_from" name="year_from" min="1990" max="2026" placeholder="e.g. 2019">
+            </div>
+            <div class="form-group">
+                <label for="year_to">Year To</label>
+                <input type="number" id="year_to" name="year_to" min="1990" max="2026" placeholder="e.g. 2023">
+            </div>
+            <div class="form-group">
+                <label for="price_from">Price From (&pound;)</label>
+                <input type="number" id="price_from" name="price_from" min="0" step="500" placeholder="e.g. 10000">
+            </div>
+            <div class="form-group">
+                <label for="price_to">Price To (&pound;)</label>
+                <input type="number" id="price_to" name="price_to" min="0" step="500" placeholder="e.g. 30000">
+            </div>
+            <div class="form-group">
+                <label for="mileage_max">Max Mileage</label>
+                <input type="number" id="mileage_max" name="mileage_max" min="0" step="5000" placeholder="e.g. 50000">
+            </div>
+            <div class="form-group">
+                <label for="fuel_type">Fuel Type</label>
+                <select id="fuel_type" name="fuel_type">
+                    <option value="">Any</option>
+                    <option value="Petrol">Petrol</option>
+                    <option value="Diesel">Diesel</option>
+                    <option value="Electric">Electric</option>
+                    <option value="Hybrid">Hybrid</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="transmission">Transmission</label>
+                <select id="transmission" name="transmission">
+                    <option value="">Any</option>
+                    <option value="Automatic">Automatic</option>
+                    <option value="Manual">Manual</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="sort_by">Sort By</label>
+                <select id="sort_by" name="sort_by">
+                    <option value="deal_score">Deal Score</option>
+                    <option value="price">Price</option>
+                    <option value="year">Year</option>
+                    <option value="mileage">Mileage</option>
+                    <option value="days_on_market">Days Listed</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="sort_order">Order</label>
+                <select id="sort_order" name="sort_order">
+                    <option value="DESC">Highest First</option>
+                    <option value="ASC">Lowest First</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="features-section">
+            <h3 onclick="document.getElementById('features-grid').style.display = document.getElementById('features-grid').style.display === 'none' ? 'grid' : 'none'">
+                Filter by Features (click to expand)
+            </h3>
+            <div id="features-grid" class="features-grid" style="display: none;">
+                {% for key, name in features.items() %}
+                <label>
+                    <input type="checkbox" name="features" value="{{ key }}">
+                    {{ name }}
+                </label>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Search</button>
+            <a href="/" class="btn btn-secondary">Reset</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

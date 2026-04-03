@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}AutoTrader Deal Finder{% endblock %}</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>AutoTrader Deal Finder</h1>
+            <nav>
+                <a href="/">Search</a>
+                <a href="/results">All Results</a>
+            </nav>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="disclaimer">
+            This tool is for personal, non-commercial use only. Data is sourced from
+            autotrader.co.uk. Always verify details directly on AutoTrader before making
+            purchasing decisions.
+        </div>
+
+        {% block content %}{% endblock %}
+    </div>
+</body>
+</html>

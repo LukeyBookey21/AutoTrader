@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block title %}Results ({{ count }}) - AutoTrader Deal Finder{% endblock %}
+
+{% block content %}
+<div class="results-header">
+    <div>
+        <h2>Results</h2>
+        <span class="results-count">{{ count }} listings found</span>
+    </div>
+    <div class="export-links">
+        <a href="/export/csv?{{ request.query_params }}" class="btn btn-secondary">Export CSV</a>
+        <a href="/export/json?{{ request.query_params }}" class="btn btn-secondary">Export JSON</a>
+        <a href="/" class="btn btn-secondary">New Search</a>
+    </div>
+</div>
+
+{% if listings %}
+<div style="overflow-x: auto;">
+    <table class="results-table">
+        <thead>
+            <tr>
+                <th>
+                    <a href="/results?{{ request.query_params }}&sort_by=deal_score&sort_order={% if params.sort_by == 'deal_score' and params.sort_order == 'DESC' %}ASC{% else %}DESC{% endif %}">
+                        Score
+                    </a>
+                </th>
+                <th>Title</th>
+                <th>
+                    <a href="/results?{{ request.query_params }}&sort_by=price&sort_order={% if params.sort_by == 'price' and params.sort_order == 'ASC' %}DESC{% else %}ASC{% endif %}">
+                        Price
+                    </a>
+                </th>
+                <th>
+                    <a href="/results?{{ request.query_params }}&sort_by=year&sort_order={% if params.sort_by == 'year' and params.sort_order == 'DESC' %}ASC{% else %}DESC{% endif %}">
+                        Year
+                    </a>
+                </th>
+                <th>
+                    <a href="/results?{{ request.query_params }}&sort_by=mileage&sort_order={% if params.sort_by == 'mileage' and params.sort_order == 'ASC' %}DESC{% else %}ASC{% endif %}">
+                        Mileage
+                    </a>
+                </th>
+                <th>Fuel</th>
+                <th>Gearbox</th>
+                <th>AT Rating</th>
+                <th>Seller</th>
+                <th>Location</th>
+                <th>Days Listed</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for listing in listings %}
+            <tr>
+                <td>
+                    {% if listing.deal_score is not none %}
+                    {% set score = listing.deal_score | int %}
+                    <span class="deal-score {% if score >= 80 %}exceptional{% elif score >= 65 %}great{% elif score >= 50 %}good{% elif score >= 35 %}fair{% else %}below{% endif %}"
+                          title="{{ listing.deal_explanation or '' }}">
+                        {{ score }}
+                    </span>
+                    {% else %}
+                    <span style="color: var(--text-muted);">--</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <a href="{{ listing.url }}" target="_blank" class="listing-title"
+                       title="Open on AutoTrader">
+                        {{ listing.title or 'Untitled' }}
+                    </a>
+                    {% if listing.features_normalised and listing.features_normalised | length > 0 %}
+                    <div style="margin-top: 4px;">
+                        {% for feat in listing.features_normalised[:4] %}
+                        <span class="feature-tag">{{ features_available.get(feat, feat) }}</span>
+                        {% endfor %}
+                        {% if listing.features_normalised | length > 4 %}
+                        <span style="color: var(--text-muted); font-size: 0.75rem;">
+                            +{{ listing.features_normalised | length - 4 }} more
+                        </span>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if listing.price %}
+                    &pound;{{ "{:,}".format(listing.price) }}
+                    {% if listing.price_dropped %}
+                    <div class="price-drop">
+                        &#9660; {% if listing.price_drop_amount %}&pound;{{ "{:,}".format(listing.price_drop_amount) }}{% endif %}
+                    </div>
+                    {% endif %}
+                    {% else %}
+                    POA
+                    {% endif %}
+                </td>
+                <td>{{ listing.year or '--' }}</td>
+                <td>{{ "{:,}".format(listing.mileage) if listing.mileage else '--' }}</td>
+                <td>{{ listing.fuel_type or '--' }}</td>
+                <td>{{ listing.transmission or '--' }}</td>
+                <td>
+                    {% if listing.at_deal_rating %}
+                    {% set rating = listing.at_deal_rating | lower %}
+                    <span class="at-rating {% if 'great' in rating %}great{% elif 'good' in rating %}good{% elif 'fair' in rating %}fair{% elif 'high' in rating %}higher{% endif %}">
+                        {{ listing.at_deal_rating }}
+                    </span>
+                    {% else %}
+                    --
+                    {% endif %}
+                </td>
+                <td>
+                    {{ listing.seller_name or listing.seller_type or '--' }}
+                </td>
+                <td>{{ listing.location or '--' }}</td>
+                <td>{{ listing.days_on_market if listing.days_on_market is not none else '--' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div style="text-align: center; padding: 48px; background: var(--card-bg); border-radius: 8px;">
+    <p style="color: var(--text-muted); font-size: 1.1rem;">No listings found matching your criteria.</p>
+    <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 8px;">
+        Try broadening your search or run a new scrape using the CLI.
+    </p>
+    <a href="/" class="btn btn-primary" style="margin-top: 16px;">Back to Search</a>
+</div>
+{% endif %}
+{% endblock %}

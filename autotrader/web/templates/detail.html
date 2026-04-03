@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block title %}{{ listing.title }} - AutoTrader Deal Finder{% endblock %}
+
+{% block content %}
+<div class="detail-card">
+    <div style="display: flex; justify-content: space-between; align-items: start; flex-wrap: wrap; gap: 12px;">
+        <div>
+            <h2>{{ listing.title or 'Untitled Listing' }}</h2>
+            <p style="color: var(--text-muted); margin-top: 4px;">
+                <a href="{{ listing.url }}" target="_blank" style="color: var(--primary);">View on AutoTrader</a>
+            </p>
+        </div>
+        <div style="text-align: right;">
+            {% if listing.price %}
+            <div style="font-size: 1.5rem; font-weight: 700;">&pound;{{ "{:,}".format(listing.price) }}</div>
+            {% if listing.price_dropped %}
+            <div class="price-drop">Price reduced{% if listing.price_drop_amount %} by &pound;{{ "{:,}".format(listing.price_drop_amount) }}{% endif %}</div>
+            {% endif %}
+            {% else %}
+            <div style="font-size: 1.5rem; font-weight: 700;">POA</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Deal Score -->
+<div class="detail-card">
+    <h2>Deal Assessment</h2>
+    {% if listing.deal_score is not none %}
+    {% set score = listing.deal_score | int %}
+    <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 12px;">
+        <span class="deal-score {% if score >= 80 %}exceptional{% elif score >= 65 %}great{% elif score >= 50 %}good{% elif score >= 35 %}fair{% else %}below{% endif %}"
+              style="font-size: 1.5rem; padding: 8px 20px;">
+            {{ score }}/100
+        </span>
+        {% if listing.at_deal_rating %}
+        {% set rating = listing.at_deal_rating | lower %}
+        <span class="at-rating {% if 'great' in rating %}great{% elif 'good' in rating %}good{% elif 'fair' in rating %}fair{% elif 'high' in rating %}higher{% endif %}"
+              style="font-size: 0.9rem; padding: 4px 12px;">
+            AutoTrader: {{ listing.at_deal_rating }}
+        </span>
+        {% endif %}
+    </div>
+    <div class="score-breakdown">{{ listing.deal_explanation or 'No breakdown available' }}</div>
+    {% else %}
+    <p style="color: var(--text-muted);">Listing has not been scored yet. Run the scoring engine from the CLI.</p>
+    {% endif %}
+</div>
+
+<!-- Key Specs -->
+<div class="detail-card">
+    <h2>Key Specifications</h2>
+    <div class="spec-grid">
+        <div class="spec-item">
+            <span class="label">Year</span>
+            <span class="value">{{ listing.year or '--' }}</span>
+        </div>
+        <div class="spec-item">
+            <span class="label">Mileage</span>
+            <span class="value">{{ "{:,}".format(listing.mileage) if listing.mileage else '--' }} miles</span>
+        </div>
+        <div class="spec-item">
+            <span class="label">Fuel Type</span>
+            <span class="value">{{ listing.fuel_type or '--' }}</span>
+        </div>
+        <div class="spec-item">
+            <span class="label">Transmission</span>
+            <span class="value">{{ listing.transmission or '--' }}</span>
+        </div>
+        <div class="spec-item">
+            <span class="label">Body Type</span>
+            <span class="value">{{ listing.body_type or '--' }}</span>
+        </div>
+        <div class="spec-item">
+            <span class="label">Engine Size</span>
+            <span class="value">{{ listing.engine_size or '--' }}L</span>
+        </div>
+        <div class="spec-item">
+            <span class="label">Colour</span>
+            <span class="value">{{ listing.colour or '--' }}</span>
+        </div>
+        <div class="spec-item">
+            <span class="label">Doors</span>
+            <span class="value">{{ listing.doors or '--' }}</span>
+        </div>
+        <div class="spec-item">
+            <span class="label">Seller</span>
+            <span class="value">{{ listing.seller_name or '--' }} ({{ listing.seller_type or '--' }})</span>
+        </div>
+        <div class="spec-item">
+            <span class="label">Location</span>
+            <span class="value">{{ listing.location or '--' }}</span>
+        </div>
+        <div class="spec-item">
+            <span class="label">Days on Market</span>
+            <span class="value">{{ listing.days_on_market if listing.days_on_market is not none else '--' }}</span>
+        </div>
+        <div class="spec-item">
+            <span class="label">Variant/Trim</span>
+            <span class="value">{{ listing.variant or '--' }}</span>
+        </div>
+    </div>
+</div>
+
+<!-- Features -->
+{% if listing.features_normalised and listing.features_normalised | length > 0 %}
+<div class="detail-card">
+    <h2>Features (Normalised)</h2>
+    <div class="features-list">
+        {% for feat in listing.features_normalised %}
+        <span class="feature-tag">{{ features.get(feat, feat.replace('_', ' ').title()) }}</span>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{% if listing.features_raw and listing.features_raw | length > 0 %}
+<div class="detail-card">
+    <h2>All Listed Features (Raw)</h2>
+    <div class="features-list">
+        {% for feat in listing.features_raw %}
+        <span class="feature-tag" style="background: #f5f5f5; color: var(--text);">{{ feat }}</span>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Description -->
+{% if listing.description %}
+<div class="detail-card">
+    <h2>Seller Description</h2>
+    <p style="white-space: pre-line; font-size: 0.9rem; line-height: 1.6;">{{ listing.description }}</p>
+</div>
+{% endif %}
+
+<div style="margin-top: 16px;">
+    <a href="javascript:history.back()" class="btn btn-secondary">Back to Results</a>
+    <a href="{{ listing.url }}" target="_blank" class="btn btn-primary">View on AutoTrader</a>
+</div>
+{% endblock %}

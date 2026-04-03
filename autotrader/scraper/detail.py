@@ -296,6 +296,11 @@ async def scrape_listing_detail(listing_id: str) -> dict | None:
             with get_db() as conn:
                 upsert_listing(conn, detail)
 
+            # Record price snapshot for history
+            if detail.get("price"):
+                from autotrader.processing.price_history import record_price_snapshot
+                record_price_snapshot(listing_id, detail["price"])
+
             logger.info(f"Scraped detail for listing {listing_id}: "
                         f"{len(detail.get('features_raw', []))} features found")
             return detail

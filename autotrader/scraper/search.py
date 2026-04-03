@@ -340,10 +340,14 @@ async def scrape_search(params: dict[str, Any], max_pages: int | None = None) ->
             seen.add(listing["id"])
             unique_listings.append(listing)
 
-    # Save to database
+    # Save to database and record price snapshots
     if unique_listings:
         upsert_listings(unique_listings)
         save_search_history(params, len(unique_listings))
+
+        # Record price snapshots for history tracking
+        from autotrader.processing.price_history import record_price_snapshots_batch
+        record_price_snapshots_batch(unique_listings)
 
     logger.info(f"Search complete: {len(unique_listings)} unique listings found")
     return unique_listings

@@ -1,4 +1,4 @@
-"""Playwright browser management with stealth and rate limiting."""
+"""Playwright browser management with stealth, rate limiting, and proxy rotation."""
 
 import asyncio
 import logging
@@ -7,7 +7,13 @@ from typing import Optional
 
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 
-from autotrader.config import HEADLESS, REQUEST_DELAY_SECONDS
+from autotrader.config import (
+    HEADLESS,
+    PROXY_LIST,
+    PROXY_PASSWORD,
+    PROXY_USERNAME,
+    REQUEST_DELAY_SECONDS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +22,28 @@ _playwright = None
 _browser: Optional[Browser] = None
 _context: Optional[BrowserContext] = None
 _last_request_time: float = 0
+_proxy_index: int = 0
+_request_count: int = 0
+_ROTATE_EVERY: int = 20  # rotate proxy every N requests
+
+
+def _get_next_proxy() -> dict | None:
+    """Get the next proxy from the rotation list."""
+    global _proxy_index
+    if not PROXY_LIST:
+        return None
+
+    proxy_url = PROXY_LIST[_proxy_index % len(PROXY_LIST)]
+    _proxy_index += 1
+
+    proxy_config = {"server": proxy_url}
+    if PROXY_USERNAME:
+        proxy_config["username"] = PROXY_USERNAME
+    if PROXY_PASSWORD:
+        proxy_config["password"] = PROXY_PASSWORD
+
+    logger.debug(f"Using proxy: {proxy_url}")
+    return proxy_config
 
 
 async def get_browser_context() -> BrowserContext:
@@ -26,13 +54,19 @@ async def get_browser_context() -> BrowserContext:
         return _context
 
     _playwright = await async_playwright().start()
+
+    launch_args = [
+        "--disable-blink-features=AutomationControlled",
+        "--disable-dev-shm-usage",
+        "--no-sandbox",
+    ]
+
+    proxy = _get_next_proxy()
+
     _browser = await _playwright.chromium.launch(
         headless=HEADLESS,
-        args=[
-            "--disable-blink-features=AutomationControlled",
-            "--disable-dev-shm-usage",
-            "--no-sandbox",
-        ],
+        args=launch_args,
+        proxy=proxy,
     )
 
     _context = await _browser.new_context(
@@ -89,8 +123,18 @@ async def rate_limit():
     _last_request_time = asyncio.get_event_loop().time()
 
 
+async def _maybe_rotate_proxy():
+    """Rotate proxy if configured and enough requests have been made."""
+    global _request_count
+    _request_count += 1
+    if PROXY_LIST and len(PROXY_LIST) > 1 and _request_count % _ROTATE_EVERY == 0:
+        logger.info(f"Rotating proxy after {_request_count} requests")
+        await close_browser()
+
+
 async def fetch_page(url: str, retries: int = 3) -> Optional[Page]:
     """Navigate to a URL with rate limiting and retries. Returns the Page object."""
+    await _maybe_rotate_proxy()
     context = await get_browser_context()
 
     for attempt in range(retries):

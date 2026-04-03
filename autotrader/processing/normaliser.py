@@ -235,23 +235,70 @@ def normalise_features(raw_features: list[str]) -> list[str]:
     return sorted(all_keys)
 
 
+def mine_features_from_description(description: str) -> list[str]:
+    """Extract feature mentions from free-text seller descriptions.
+
+    Scans the description for references to canonical features that weren't
+    captured in the structured features list. Returns canonical keys found.
+    """
+    if not description or not description.strip():
+        return []
+
+    found = set()
+    for canonical_key, patterns in _COMPILED_PATTERNS.items():
+        for pattern in patterns:
+            if pattern.search(description):
+                found.add(canonical_key)
+                break
+
+    return sorted(found)
+
+
 def normalise_all_listings(make: str | None = None, model: str | None = None):
     """Normalise features for all listings in the database.
+
+    Combines structured features, description text mining, and trim-level
+    inference to produce the most complete feature set possible.
 
     Args:
         make: Optional filter by make.
         model: Optional filter by model.
     """
+    from autotrader.processing.trim_features import infer_trim_features
+
     listings = get_all_listings_for_scoring(make, model)
     updated = 0
 
     for listing in listings:
         raw = listing.get("features_raw", [])
-        if not raw:
-            continue
 
-        normalised = normalise_features(raw)
-        update_listing_normalised_features(listing["id"], normalised)
+        # Start with structured feature normalisation
+        normalised = set(normalise_features(raw)) if raw else set()
+
+        # Text mining: extract features from description
+        description = listing.get("description", "")
+        if description:
+            mined = mine_features_from_description(description)
+            normalised.update(mined)
+
+        # Trim-level inference: infer standard features from trim/variant
+        inferred = infer_trim_features(
+            make=listing.get("make", ""),
+            model=listing.get("model", ""),
+            variant=listing.get("variant", ""),
+            title=listing.get("title", ""),
+            year=listing.get("year"),
+        )
+        normalised.update(inferred)
+
+        # Apply precedence rules
+        if "parking_sensors_front_rear" in normalised:
+            normalised.discard("parking_sensors_rear")
+        if "panoramic_roof" in normalised:
+            normalised.discard("sunroof")
+
+        final = sorted(normalised)
+        update_listing_normalised_features(listing["id"], final)
         updated += 1
 
     logger.info(f"Normalised features for {updated} listings")

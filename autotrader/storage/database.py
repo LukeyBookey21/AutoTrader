@@ -109,7 +109,67 @@ def init_db():
                 ON listings(scraped_at);
             CREATE INDEX IF NOT EXISTS idx_market_stats_lookup
                 ON market_stats(make, model, year, mileage_band);
+
+            -- Price history tracking
+            CREATE TABLE IF NOT EXISTS price_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                listing_id TEXT NOT NULL,
+                price INTEGER NOT NULL,
+                recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (listing_id) REFERENCES listings(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_price_history_listing
+                ON price_history(listing_id, recorded_at);
+
+            -- MOT data storage (ALTER TABLE handled separately)
+
+            -- Monitoring watches
+            CREATE TABLE IF NOT EXISTS watches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                search_params TEXT NOT NULL,
+                min_score INTEGER,
+                max_price INTEGER,
+                required_features TEXT DEFAULT '[]',
+                active INTEGER DEFAULT 1,
+                last_checked TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS watch_seen (
+                watch_id INTEGER NOT NULL,
+                listing_id TEXT NOT NULL,
+                first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (watch_id, listing_id),
+                FOREIGN KEY (watch_id) REFERENCES watches(id) ON DELETE CASCADE,
+                FOREIGN KEY (listing_id) REFERENCES listings(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                watch_id INTEGER,
+                listing_id TEXT,
+                alert_type TEXT NOT NULL,
+                message TEXT NOT NULL,
+                read INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (watch_id) REFERENCES watches(id),
+                FOREIGN KEY (listing_id) REFERENCES listings(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_alerts_unread
+                ON alerts(read, created_at);
         """)
+
+        # Safe column additions (ignore if already exists)
+        for col, col_type, default in [
+            ("mot_data", "TEXT", "NULL"),
+        ]:
+            try:
+                conn.execute(
+                    f"ALTER TABLE listings ADD COLUMN {col} {col_type} DEFAULT {default}"
+                )
+            except sqlite3.OperationalError:
+                pass  # Column already exists
 
 
 def upsert_listing(conn: sqlite3.Connection, listing: dict[str, Any]):
@@ -355,4 +415,10 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
                 d[field] = json.loads(d[field])
             except (json.JSONDecodeError, TypeError):
                 d[field] = []
+    # Deserialise MOT data if present
+    if isinstance(d.get("mot_data"), str):
+        try:
+            d["mot_data"] = json.loads(d["mot_data"])
+        except (json.JSONDecodeError, TypeError):
+            d["mot_data"] = None
     return d

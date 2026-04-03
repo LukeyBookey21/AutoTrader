@@ -1,4 +1,4 @@
-"""FastAPI web application for browsing and filtering scraped listings."""
+"""FastAPI web application with full API for the SPA frontend."""
 
 import csv
 import io
@@ -7,21 +7,30 @@ import logging
 from pathlib import Path
 
 from fastapi import FastAPI, Query, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 
+from autotrader.monitoring import (
+    delete_watch,
+    get_alerts,
+    list_watches,
+    mark_alerts_read,
+    save_watch,
+)
 from autotrader.processing.normaliser import FEATURE_DISPLAY_NAMES
-from autotrader.storage.database import get_listing, init_db, search_listings
+from autotrader.processing.price_history import (
+    get_market_price_trend,
+    get_price_drops,
+    get_price_history,
+)
+from autotrader.storage.database import get_db, get_listing, init_db, search_listings
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="AutoTrader Deal Finder", version="1.0.0")
+app = FastAPI(title="AutoTrader Deal Finder", version="2.0.0")
 
-# Static files and templates
 _web_dir = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=str(_web_dir / "static")), name="static")
-templates = Jinja2Templates(directory=str(_web_dir / "templates"))
 
 
 @app.on_event("startup")
@@ -29,36 +38,21 @@ async def startup():
     init_db()
 
 
+# ---------- SPA entry point ----------
+
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    """Search form page."""
-    return templates.TemplateResponse(
-        "index.html",
-        {
-            "request": request,
-            "features": FEATURE_DISPLAY_NAMES,
-        },
-    )
+async def index():
+    """Serve the SPA."""
+    return FileResponse(str(_web_dir / "static" / "index.html"))
 
 
-@app.get("/results", response_class=HTMLResponse)
-async def results(
-    request: Request,
-    make: str = Query(default=""),
-    model: str = Query(default=""),
-    year_from: int | None = Query(default=None),
-    year_to: int | None = Query(default=None),
-    price_from: int | None = Query(default=None),
-    price_to: int | None = Query(default=None),
-    mileage_max: int | None = Query(default=None),
-    fuel_type: str = Query(default=""),
-    transmission: str = Query(default=""),
-    features: list[str] = Query(default=[]),
-    sort_by: str = Query(default="deal_score"),
-    sort_order: str = Query(default="DESC"),
+# ---------- API: Listings ----------
+
+def _parse_listing_params(
+    make, model, year_from, year_to, price_from, price_to,
+    mileage_max, fuel_type, transmission, features, sort_by, sort_order, limit,
 ):
-    """Results page with filtering and sorting."""
-    listings = search_listings(
+    return search_listings(
         make=make or None,
         model=model or None,
         year_from=year_from,
@@ -71,50 +65,185 @@ async def results(
         features=features or None,
         sort_by=sort_by,
         sort_order=sort_order,
-    )
-
-    return templates.TemplateResponse(
-        "results.html",
-        {
-            "request": request,
-            "listings": listings,
-            "count": len(listings),
-            "features_available": FEATURE_DISPLAY_NAMES,
-            "selected_features": features,
-            # Pass search params back for the form
-            "params": {
-                "make": make,
-                "model": model,
-                "year_from": year_from,
-                "year_to": year_to,
-                "price_from": price_from,
-                "price_to": price_to,
-                "mileage_max": mileage_max,
-                "fuel_type": fuel_type,
-                "transmission": transmission,
-                "sort_by": sort_by,
-                "sort_order": sort_order,
-            },
-        },
+        limit=limit,
     )
 
 
-@app.get("/listing/{listing_id}", response_class=HTMLResponse)
-async def listing_detail(request: Request, listing_id: str):
-    """Detail view for a single listing."""
+@app.get("/api/listings")
+async def api_listings(
+    make: str = Query(default=""),
+    model: str = Query(default=""),
+    year_from: int | None = Query(default=None),
+    year_to: int | None = Query(default=None),
+    price_from: int | None = Query(default=None),
+    price_to: int | None = Query(default=None),
+    mileage_max: int | None = Query(default=None),
+    fuel_type: str = Query(default=""),
+    transmission: str = Query(default=""),
+    features: list[str] = Query(default=[]),
+    sort_by: str = Query(default="deal_score"),
+    sort_order: str = Query(default="DESC"),
+    limit: int = Query(default=200),
+):
+    """JSON API endpoint for listings."""
+    listings = _parse_listing_params(
+        make, model, year_from, year_to, price_from, price_to,
+        mileage_max, fuel_type, transmission, features, sort_by, sort_order, limit,
+    )
+    return {"count": len(listings), "listings": listings}
+
+
+@app.get("/api/listing/{listing_id}")
+async def api_listing_detail(listing_id: str):
+    """Get a single listing with full detail."""
     listing = get_listing(listing_id)
     if not listing:
-        return HTMLResponse(content="Listing not found", status_code=404)
+        return {"error": "Listing not found"}, 404
+    return listing
 
-    return templates.TemplateResponse(
-        "detail.html",
-        {
-            "request": request,
-            "listing": listing,
-            "features": FEATURE_DISPLAY_NAMES,
+
+@app.get("/api/features")
+async def api_features():
+    """Get the list of available canonical features."""
+    return FEATURE_DISPLAY_NAMES
+
+
+@app.get("/api/stats")
+async def api_stats():
+    """Get database statistics."""
+    with get_db() as conn:
+        total = conn.execute("SELECT COUNT(*) FROM listings").fetchone()[0]
+        detailed = conn.execute(
+            "SELECT COUNT(*) FROM listings WHERE detail_scraped = 1"
+        ).fetchone()[0]
+        scored = conn.execute(
+            "SELECT COUNT(*) FROM listings WHERE deal_score IS NOT NULL"
+        ).fetchone()[0]
+        searches = conn.execute("SELECT COUNT(*) FROM search_history").fetchone()[0]
+
+        makes = conn.execute(
+            "SELECT make, COUNT(*) as cnt FROM listings "
+            "WHERE make IS NOT NULL AND make != '' "
+            "GROUP BY make ORDER BY cnt DESC LIMIT 20"
+        ).fetchall()
+
+        score_dist = conn.execute(
+            """SELECT
+                SUM(CASE WHEN deal_score >= 80 THEN 1 ELSE 0 END) as exceptional,
+                SUM(CASE WHEN deal_score >= 65 AND deal_score < 80 THEN 1 ELSE 0 END) as great,
+                SUM(CASE WHEN deal_score >= 50 AND deal_score < 65 THEN 1 ELSE 0 END) as good,
+                SUM(CASE WHEN deal_score >= 35 AND deal_score < 50 THEN 1 ELSE 0 END) as fair,
+                SUM(CASE WHEN deal_score < 35 THEN 1 ELSE 0 END) as below
+               FROM listings WHERE deal_score IS NOT NULL"""
+        ).fetchone()
+
+    return {
+        "total_listings": total,
+        "detail_scraped": detailed,
+        "scored": scored,
+        "searches_run": searches,
+        "makes": [{"make": row[0], "count": row[1]} for row in makes],
+        "score_distribution": {
+            "exceptional": score_dist[0] or 0,
+            "great": score_dist[1] or 0,
+            "good": score_dist[2] or 0,
+            "fair": score_dist[3] or 0,
+            "below": score_dist[4] or 0,
         },
-    )
+    }
 
+
+# ---------- API: Price History ----------
+
+@app.get("/api/price-history/{listing_id}")
+async def api_price_history(listing_id: str):
+    """Get price history for a specific listing."""
+    history = get_price_history(listing_id)
+    return {"listing_id": listing_id, "history": history}
+
+
+@app.get("/api/price-drops")
+async def api_price_drops(
+    min_drop: int = Query(default=200),
+    limit: int = Query(default=50),
+):
+    """Get listings with the biggest price drops."""
+    drops = get_price_drops(min_drop=min_drop, limit=limit)
+    return {"drops": drops}
+
+
+@app.get("/api/market-trend")
+async def api_market_trend(
+    make: str = Query(required=True),
+    model: str = Query(required=True),
+    year: int | None = Query(default=None),
+):
+    """Get average price trend for a make/model over time."""
+    trend = get_market_price_trend(make, model, year)
+    return {"make": make, "model": model, "year": year, "trend": trend}
+
+
+# ---------- API: Watches & Alerts ----------
+
+@app.get("/api/watches")
+async def api_list_watches():
+    """List all saved watches."""
+    return {"watches": list_watches()}
+
+
+@app.post("/api/watches")
+async def api_create_watch(request: Request):
+    """Create a new watch."""
+    body = await request.json()
+    save_watch(
+        name=body.get("name", "Unnamed Watch"),
+        search_params=body.get("search_params", {}),
+        min_score=body.get("min_score"),
+        max_price=body.get("max_price"),
+        required_features=body.get("required_features"),
+    )
+    return {"status": "created"}
+
+
+@app.delete("/api/watches/{watch_id}")
+async def api_delete_watch(watch_id: int):
+    """Delete a watch."""
+    delete_watch(watch_id)
+    return {"status": "deleted"}
+
+
+@app.get("/api/alerts")
+async def api_list_alerts(
+    limit: int = Query(default=50),
+    unread_only: bool = Query(default=False),
+):
+    """Get alerts."""
+    alerts = get_alerts(limit=limit, unread_only=unread_only)
+    return {"alerts": alerts}
+
+
+@app.post("/api/alerts/read")
+async def api_mark_alerts_read(request: Request):
+    """Mark alerts as read."""
+    body = await request.json()
+    mark_alerts_read(body.get("ids"))
+    return {"status": "ok"}
+
+
+# ---------- API: Compare ----------
+
+@app.get("/api/compare")
+async def api_compare(ids: list[str] = Query(default=[])):
+    """Get multiple listings for side-by-side comparison."""
+    listings = []
+    for lid in ids[:5]:  # Max 5 comparisons
+        listing = get_listing(lid)
+        if listing:
+            listings.append(listing)
+    return {"listings": listings}
+
+
+# ---------- Export ----------
 
 @app.get("/export/csv")
 async def export_csv(
@@ -132,19 +261,9 @@ async def export_csv(
     sort_order: str = Query(default="DESC"),
 ):
     """Export filtered results as CSV."""
-    listings = search_listings(
-        make=make or None,
-        model=model or None,
-        year_from=year_from,
-        year_to=year_to,
-        price_from=price_from,
-        price_to=price_to,
-        mileage_max=mileage_max,
-        fuel_type=fuel_type or None,
-        transmission=transmission or None,
-        features=features or None,
-        sort_by=sort_by,
-        sort_order=sort_order,
+    listings = _parse_listing_params(
+        make, model, year_from, year_to, price_from, price_to,
+        mileage_max, fuel_type, transmission, features, sort_by, sort_order, 500,
     )
 
     csv_fields = [
@@ -159,7 +278,6 @@ async def export_csv(
     writer.writeheader()
     for listing in listings:
         row = {k: listing.get(k, "") for k in csv_fields}
-        # Convert lists to strings for CSV
         if isinstance(row.get("features_normalised"), list):
             row["features_normalised"] = ", ".join(row["features_normalised"])
         writer.writerow(row)
@@ -189,19 +307,9 @@ async def export_json(
     sort_order: str = Query(default="DESC"),
 ):
     """Export filtered results as JSON."""
-    listings = search_listings(
-        make=make or None,
-        model=model or None,
-        year_from=year_from,
-        year_to=year_to,
-        price_from=price_from,
-        price_to=price_to,
-        mileage_max=mileage_max,
-        fuel_type=fuel_type or None,
-        transmission=transmission or None,
-        features=features or None,
-        sort_by=sort_by,
-        sort_order=sort_order,
+    listings = _parse_listing_params(
+        make, model, year_from, year_to, price_from, price_to,
+        mileage_max, fuel_type, transmission, features, sort_by, sort_order, 500,
     )
 
     filename = f"autotrader_deals_{make or 'all'}_{model or 'all'}.json"
@@ -211,36 +319,3 @@ async def export_json(
         media_type="application/json",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
-
-
-@app.get("/api/listings")
-async def api_listings(
-    make: str = Query(default=""),
-    model: str = Query(default=""),
-    year_from: int | None = Query(default=None),
-    year_to: int | None = Query(default=None),
-    price_from: int | None = Query(default=None),
-    price_to: int | None = Query(default=None),
-    mileage_max: int | None = Query(default=None),
-    fuel_type: str = Query(default=""),
-    transmission: str = Query(default=""),
-    features: list[str] = Query(default=[]),
-    sort_by: str = Query(default="deal_score"),
-    sort_order: str = Query(default="DESC"),
-):
-    """JSON API endpoint for listings."""
-    listings = search_listings(
-        make=make or None,
-        model=model or None,
-        year_from=year_from,
-        year_to=year_to,
-        price_from=price_from,
-        price_to=price_to,
-        mileage_max=mileage_max,
-        fuel_type=fuel_type or None,
-        transmission=transmission or None,
-        features=features or None,
-        sort_by=sort_by,
-        sort_order=sort_order,
-    )
-    return {"count": len(listings), "listings": listings}

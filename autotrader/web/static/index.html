@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoTrader Deal Finder</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        exceptional: '#0a6b2e',
+                        great: '#2e7d32',
+                        good: '#558b2f',
+                        fair: '#f9a825',
+                        below: '#c62828',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        [x-cloak] { display: none !important; }
+        .score-bar { transition: width 0.5s ease; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900 min-h-screen" x-data="app()" x-init="init()">
+
+<!-- Nav -->
+<nav class="bg-white border-b-2 border-blue-600 sticky top-0 z-50 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+        <h1 class="text-xl font-bold text-blue-600 cursor-pointer" @click="page='search'">
+            AutoTrader Deal Finder
+        </h1>
+        <div class="flex gap-4 text-sm">
+            <button @click="page='search'" :class="page==='search' ? 'text-blue-600 font-semibold' : 'text-gray-500 hover:text-blue-600'">Search</button>
+            <button @click="page='results'; loadResults()" :class="page==='results' ? 'text-blue-600 font-semibold' : 'text-gray-500 hover:text-blue-600'">Results</button>
+            <button @click="page='watches'; loadWatches()" :class="page==='watches' ? 'text-blue-600 font-semibold' : 'text-gray-500 hover:text-blue-600'">
+                Watches
+                <span x-show="unreadAlerts > 0" class="ml-1 bg-red-500 text-white text-xs px-1.5 py-0.5 rounded-full" x-text="unreadAlerts"></span>
+            </button>
+            <button @click="page='stats'; loadStats()" :class="page==='stats' ? 'text-blue-600 font-semibold' : 'text-gray-500 hover:text-blue-600'">Stats</button>
+        </div>
+    </div>
+</nav>
+
+<!-- Disclaimer -->
+<div class="max-w-7xl mx-auto px-4 mt-4">
+    <div class="bg-amber-50 border border-amber-300 rounded-lg px-4 py-2 text-xs text-amber-800">
+        Personal, non-commercial use only. Data from autotrader.co.uk. Always verify on AutoTrader before purchasing.
+    </div>
+</div>
+
+<!-- Search Page -->
+<div x-show="page==='search'" x-cloak class="max-w-7xl mx-auto px-4 py-6">
+    <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h2 class="text-lg font-semibold mb-4">Search Listings</h2>
+        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-4">
+            <div>
+                <label class="block text-xs font-medium text-gray-500 mb-1">Make</label>
+                <input x-model="search.make" class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="e.g. BMW">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 mb-1">Model</label>
+                <input x-model="search.model" class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" placeholder="e.g. 3 Series">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 mb-1">Year From</label>
+                <input x-model.number="search.year_from" type="number" min="1990" max="2026" class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" placeholder="2019">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 mb-1">Year To</label>
+                <input x-model.number="search.year_to" type="number" min="1990" max="2026" class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" placeholder="2024">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 mb-1">Price From</label>
+                <input x-model.number="search.price_from" type="number" step="500" class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" placeholder="5000">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 mb-1">Price To</label>
+                <input x-model.number="search.price_to" type="number" step="500" class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" placeholder="30000">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 mb-1">Max Mileage</label>
+                <input x-model.number="search.mileage_max" type="number" step="5000" class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" placeholder="50000">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 mb-1">Fuel Type</label>
+                <select x-model="search.fuel_type" class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">
+                    <option value="">Any</option>
+                    <option>Petrol</option><option>Diesel</option><option>Electric</option><option>Hybrid</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 mb-1">Transmission</label>
+                <select x-model="search.transmission" class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">
+                    <option value="">Any</option>
+                    <option>Automatic</option><option>Manual</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 mb-1">Sort By</label>
+                <select x-model="search.sort_by" class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">
+                    <option value="deal_score">Deal Score</option>
+                    <option value="price">Price</option>
+                    <option value="year">Year</option>
+                    <option value="mileage">Mileage</option>
+                    <option value="days_on_market">Days Listed</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 mb-1">Order</label>
+                <select x-model="search.sort_order" class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">
+                    <option value="DESC">High to Low</option>
+                    <option value="ASC">Low to High</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Features filter -->
+        <details class="mb-4">
+            <summary class="cursor-pointer text-sm font-medium text-gray-600 hover:text-blue-600">Filter by Features</summary>
+            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 mt-3">
+                <template x-for="[key, name] in Object.entries(features)" :key="key">
+                    <label class="flex items-center gap-2 text-xs cursor-pointer">
+                        <input type="checkbox" :value="key" x-model="search.features" class="rounded text-blue-600 focus:ring-blue-500">
+                        <span x-text="name"></span>
+                    </label>
+                </template>
+            </div>
+        </details>
+
+        <div class="flex gap-3">
+            <button @click="loadResults(); page='results'" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg text-sm font-semibold transition">
+                Search
+            </button>
+            <button @click="resetSearch()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-2 rounded-lg text-sm font-medium transition">
+                Reset
+            </button>
+            <button @click="saveCurrentAsWatch()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition" title="Save as Watch">
+                Save Watch
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Results Page -->
+<div x-show="page==='results'" x-cloak class="max-w-7xl mx-auto px-4 py-6">
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
+        <div>
+            <h2 class="text-lg font-semibold">Results</h2>
+            <p class="text-sm text-gray-500" x-text="`${listings.length} listings found`"></p>
+        </div>
+        <div class="flex gap-2 flex-wrap">
+            <button @click="page='search'" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-medium">Edit Search</button>
+            <a :href="exportUrl('csv')" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-medium no-underline">Export CSV</a>
+            <a :href="exportUrl('json')" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-medium no-underline">Export JSON</a>
+            <button x-show="compareList.length >= 2" @click="page='compare'; loadCompare()"
+                    class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium">
+                Compare (<span x-text="compareList.length"></span>)
+            </button>
+        </div>
+    </div>
+
+    <div x-show="loading" class="text-center py-12 text-gray-400">Loading...</div>
+
+    <div x-show="!loading && listings.length === 0" class="text-center py-12 bg-white rounded-xl shadow-sm border">
+        <p class="text-gray-400 text-lg">No listings found</p>
+        <p class="text-gray-400 text-sm mt-1">Try broadening your search or run a new scrape via CLI</p>
+    </div>
+
+    <!-- Results Table -->
+    <div x-show="!loading && listings.length > 0" class="bg-white rounded-xl shadow-sm border overflow-x-auto">
+        <table class="w-full">
+            <thead>
+                <tr class="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    <th class="px-3 py-3 w-8"></th>
+                    <th class="px-3 py-3 cursor-pointer hover:text-blue-600" @click="sortResults('deal_score')">Score</th>
+                    <th class="px-3 py-3">Title</th>
+                    <th class="px-3 py-3 cursor-pointer hover:text-blue-600" @click="sortResults('price')">Price</th>
+                    <th class="px-3 py-3 cursor-pointer hover:text-blue-600" @click="sortResults('year')">Year</th>
+                    <th class="px-3 py-3 cursor-pointer hover:text-blue-600" @click="sortResults('mileage')">Mileage</th>
+                    <th class="px-3 py-3 hidden md:table-cell">Fuel</th>
+                    <th class="px-3 py-3 hidden lg:table-cell">AT Rating</th>
+                    <th class="px-3 py-3 hidden lg:table-cell">Location</th>
+                    <th class="px-3 py-3 hidden xl:table-cell">Days</th>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-for="l in listings" :key="l.id">
+                    <tr class="border-t hover:bg-blue-50/50 transition-colors">
+                        <td class="px-3 py-2">
+                            <input type="checkbox" :value="l.id" x-model="compareList" class="rounded text-purple-600 focus:ring-purple-500">
+                        </td>
+                        <td class="px-3 py-2">
+                            <span x-show="l.deal_score != null"
+                                  :class="scoreClass(l.deal_score)"
+                                  class="inline-block px-2.5 py-1 rounded-full text-xs font-bold text-white min-w-[36px] text-center"
+                                  :title="l.deal_explanation"
+                                  x-text="Math.round(l.deal_score)"></span>
+                            <span x-show="l.deal_score == null" class="text-gray-300 text-xs">--</span>
+                        </td>
+                        <td class="px-3 py-2">
+                            <a :href="l.url" target="_blank" class="text-blue-600 hover:underline text-sm font-medium" x-text="l.title || 'Untitled'"></a>
+                            <div class="flex flex-wrap gap-1 mt-1" x-show="l.features_normalised && l.features_normalised.length">
+                                <template x-for="f in (l.features_normalised || []).slice(0, 3)" :key="f">
+                                    <span class="bg-blue-50 text-blue-700 text-[10px] px-1.5 py-0.5 rounded" x-text="features[f] || f"></span>
+                                </template>
+                                <span x-show="(l.features_normalised || []).length > 3" class="text-gray-400 text-[10px]"
+                                      x-text="'+' + ((l.features_normalised || []).length - 3) + ' more'"></span>
+                            </div>
+                        </td>
+                        <td class="px-3 py-2 text-sm font-medium whitespace-nowrap">
+                            <span x-text="l.price ? '£' + l.price.toLocaleString() : 'POA'"></span>
+                            <div x-show="l.price_dropped" class="text-green-600 text-xs font-semibold">
+                                &#9660; <span x-show="l.price_drop_amount" x-text="'£' + (l.price_drop_amount || 0).toLocaleString()"></span>
+                            </div>
+                        </td>
+                        <td class="px-3 py-2 text-sm" x-text="l.year || '--'"></td>
+                        <td class="px-3 py-2 text-sm" x-text="l.mileage ? l.mileage.toLocaleString() : '--'"></td>
+                        <td class="px-3 py-2 text-xs hidden md:table-cell" x-text="l.fuel_type || '--'"></td>
+                        <td class="px-3 py-2 hidden lg:table-cell">
+                            <span x-show="l.at_deal_rating"
+                                  :class="atRatingClass(l.at_deal_rating)"
+                                  class="text-xs font-semibold px-2 py-0.5 rounded"
+                                  x-text="l.at_deal_rating"></span>
+                        </td>
+                        <td class="px-3 py-2 text-xs hidden lg:table-cell" x-text="l.location || '--'"></td>
+                        <td class="px-3 py-2 text-xs hidden xl:table-cell" x-text="l.days_on_market != null ? l.days_on_market : '--'"></td>
+                    </tr>
+                </template>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Compare Page -->
+<div x-show="page==='compare'" x-cloak class="max-w-7xl mx-auto px-4 py-6">
+    <div class="flex justify-between items-center mb-4">
+        <h2 class="text-lg font-semibold">Compare Listings</h2>
+        <button @click="page='results'" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-medium">Back to Results</button>
+    </div>
+    <div x-show="compareListings.length === 0" class="text-center py-12 text-gray-400">Select 2-5 listings to compare</div>
+    <div x-show="compareListings.length > 0" class="grid gap-4" :class="compareListings.length <= 2 ? 'md:grid-cols-2' : 'md:grid-cols-3'">
+        <template x-for="c in compareListings" :key="c.id">
+            <div class="bg-white rounded-xl shadow-sm border p-4">
+                <h3 class="font-semibold text-sm mb-3 text-blue-600">
+                    <a :href="c.url" target="_blank" x-text="c.title" class="hover:underline"></a>
+                </h3>
+                <div class="space-y-2 text-sm">
+                    <div class="flex justify-between"><span class="text-gray-500">Price</span><span class="font-medium" x-text="c.price ? '£' + c.price.toLocaleString() : 'POA'"></span></div>
+                    <div class="flex justify-between"><span class="text-gray-500">Score</span>
+                        <span :class="scoreClass(c.deal_score)" class="px-2 py-0.5 rounded-full text-xs font-bold text-white" x-text="c.deal_score ? Math.round(c.deal_score) + '/100' : '--'"></span>
+                    </div>
+                    <div class="flex justify-between"><span class="text-gray-500">Year</span><span x-text="c.year || '--'"></span></div>
+                    <div class="flex justify-between"><span class="text-gray-500">Mileage</span><span x-text="c.mileage ? c.mileage.toLocaleString() : '--'"></span></div>
+                    <div class="flex justify-between"><span class="text-gray-500">Fuel</span><span x-text="c.fuel_type || '--'"></span></div>
+                    <div class="flex justify-between"><span class="text-gray-500">Gearbox</span><span x-text="c.transmission || '--'"></span></div>
+                    <div class="flex justify-between"><span class="text-gray-500">Colour</span><span x-text="c.colour || '--'"></span></div>
+                    <div class="flex justify-between"><span class="text-gray-500">Seller</span><span x-text="c.seller_name || c.seller_type || '--'"></span></div>
+                    <div class="flex justify-between"><span class="text-gray-500">AT Rating</span><span x-text="c.at_deal_rating || '--'"></span></div>
+                    <div class="flex justify-between"><span class="text-gray-500">Days Listed</span><span x-text="c.days_on_market != null ? c.days_on_market : '--'"></span></div>
+                </div>
+                <div x-show="c.features_normalised && c.features_normalised.length" class="mt-3 pt-3 border-t">
+                    <p class="text-xs font-medium text-gray-500 mb-1">Features</p>
+                    <div class="flex flex-wrap gap-1">
+                        <template x-for="f in c.features_normalised || []" :key="f">
+                            <span class="bg-blue-50 text-blue-700 text-[10px] px-1.5 py-0.5 rounded" x-text="features[f] || f"></span>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </template>
+    </div>
+</div>
+
+<!-- Watches & Alerts Page -->
+<div x-show="page==='watches'" x-cloak class="max-w-7xl mx-auto px-4 py-6">
+    <h2 class="text-lg font-semibold mb-4">Watches & Alerts</h2>
+
+    <!-- Watches -->
+    <div class="bg-white rounded-xl shadow-sm border p-4 mb-6">
+        <h3 class="font-medium mb-3">Saved Watches</h3>
+        <div x-show="watches.length === 0" class="text-gray-400 text-sm py-4 text-center">
+            No watches saved. Use "Save Watch" on the search page to create one.
+        </div>
+        <div class="space-y-2">
+            <template x-for="w in watches" :key="w.id">
+                <div class="flex items-center justify-between border rounded-lg px-4 py-3">
+                    <div>
+                        <span class="font-medium text-sm" x-text="w.name"></span>
+                        <span class="text-gray-400 text-xs ml-2" x-text="'Last checked: ' + (w.last_checked || 'never')"></span>
+                    </div>
+                    <button @click="deleteWatch(w.id)" class="text-red-500 hover:text-red-700 text-xs">Delete</button>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- Alerts -->
+    <div class="bg-white rounded-xl shadow-sm border p-4">
+        <div class="flex justify-between items-center mb-3">
+            <h3 class="font-medium">Recent Alerts</h3>
+            <button x-show="alerts.length > 0" @click="markAllRead()" class="text-xs text-blue-600 hover:underline">Mark all read</button>
+        </div>
+        <div x-show="alerts.length === 0" class="text-gray-400 text-sm py-4 text-center">
+            No alerts yet. Alerts are generated when watches detect new listings or price drops.
+        </div>
+        <div class="space-y-2">
+            <template x-for="a in alerts" :key="a.id">
+                <div class="flex items-start gap-3 border rounded-lg px-4 py-3" :class="a.read ? 'opacity-60' : 'bg-blue-50'">
+                    <span :class="a.alert_type === 'price_drop' ? 'text-green-600' : 'text-blue-600'" class="text-lg mt-0.5"
+                          x-text="a.alert_type === 'price_drop' ? '&#9660;' : '&#9733;'"></span>
+                    <div>
+                        <p class="text-sm" x-text="a.message"></p>
+                        <p class="text-xs text-gray-400 mt-1" x-text="a.created_at"></p>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+</div>
+
+<!-- Stats Page -->
+<div x-show="page==='stats'" x-cloak class="max-w-7xl mx-auto px-4 py-6">
+    <h2 class="text-lg font-semibold mb-4">Database Statistics</h2>
+
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div class="bg-white rounded-xl shadow-sm border p-4 text-center">
+            <p class="text-2xl font-bold text-blue-600" x-text="stats.total_listings || 0"></p>
+            <p class="text-xs text-gray-500 mt-1">Total Listings</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border p-4 text-center">
+            <p class="text-2xl font-bold text-green-600" x-text="stats.detail_scraped || 0"></p>
+            <p class="text-xs text-gray-500 mt-1">Detail Scraped</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border p-4 text-center">
+            <p class="text-2xl font-bold text-purple-600" x-text="stats.scored || 0"></p>
+            <p class="text-xs text-gray-500 mt-1">Scored</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border p-4 text-center">
+            <p class="text-2xl font-bold text-amber-600" x-text="stats.searches_run || 0"></p>
+            <p class="text-xs text-gray-500 mt-1">Searches Run</p>
+        </div>
+    </div>
+
+    <!-- Score Distribution Chart -->
+    <div class="grid md:grid-cols-2 gap-6 mb-6">
+        <div class="bg-white rounded-xl shadow-sm border p-4">
+            <h3 class="font-medium mb-3 text-sm">Score Distribution</h3>
+            <canvas id="scoreChart" height="200"></canvas>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border p-4">
+            <h3 class="font-medium mb-3 text-sm">Top Makes</h3>
+            <canvas id="makesChart" height="200"></canvas>
+        </div>
+    </div>
+
+    <!-- Price Drops -->
+    <div class="bg-white rounded-xl shadow-sm border p-4">
+        <h3 class="font-medium mb-3 text-sm">Biggest Price Drops</h3>
+        <div id="priceDropsList"></div>
+    </div>
+</div>
+
+<script>
+function app() {
+    return {
+        page: 'search',
+        loading: false,
+        listings: [],
+        features: {},
+        search: {
+            make: '', model: '', year_from: null, year_to: null,
+            price_from: null, price_to: null, mileage_max: null,
+            fuel_type: '', transmission: '', sort_by: 'deal_score',
+            sort_order: 'DESC', features: [],
+        },
+        compareList: [],
+        compareListings: [],
+        watches: [],
+        alerts: [],
+        unreadAlerts: 0,
+        stats: {},
+
+        async init() {
+            const res = await fetch('/api/features');
+            this.features = await res.json();
+            this.loadAlertCount();
+        },
+
+        async loadResults() {
+            this.loading = true;
+            const params = new URLSearchParams();
+            for (const [k, v] of Object.entries(this.search)) {
+                if (v !== null && v !== '' && !(Array.isArray(v) && v.length === 0)) {
+                    if (Array.isArray(v)) {
+                        v.forEach(item => params.append(k, item));
+                    } else {
+                        params.set(k, v);
+                    }
+                }
+            }
+            try {
+                const res = await fetch('/api/listings?' + params.toString());
+                const data = await res.json();
+                this.listings = data.listings || [];
+            } catch (e) {
+                console.error(e);
+            }
+            this.loading = false;
+        },
+
+        sortResults(field) {
+            if (this.search.sort_by === field) {
+                this.search.sort_order = this.search.sort_order === 'DESC' ? 'ASC' : 'DESC';
+            } else {
+                this.search.sort_by = field;
+                this.search.sort_order = field === 'price' || field === 'mileage' ? 'ASC' : 'DESC';
+            }
+            this.loadResults();
+        },
+
+        resetSearch() {
+            this.search = {
+                make: '', model: '', year_from: null, year_to: null,
+                price_from: null, price_to: null, mileage_max: null,
+                fuel_type: '', transmission: '', sort_by: 'deal_score',
+                sort_order: 'DESC', features: [],
+            };
+        },
+
+        exportUrl(format) {
+            const params = new URLSearchParams();
+            for (const [k, v] of Object.entries(this.search)) {
+                if (v !== null && v !== '' && !(Array.isArray(v) && v.length === 0)) {
+                    if (Array.isArray(v)) {
+                        v.forEach(item => params.append(k, item));
+                    } else {
+                        params.set(k, v);
+                    }
+                }
+            }
+            return `/export/${format}?${params.toString()}`;
+        },
+
+        async loadCompare() {
+            if (this.compareList.length < 2) return;
+            const params = this.compareList.map(id => 'ids=' + id).join('&');
+            const res = await fetch('/api/compare?' + params);
+            const data = await res.json();
+            this.compareListings = data.listings || [];
+        },
+
+        async loadWatches() {
+            const [wRes, aRes] = await Promise.all([
+                fetch('/api/watches'),
+                fetch('/api/alerts?limit=30'),
+            ]);
+            this.watches = (await wRes.json()).watches || [];
+            this.alerts = (await aRes.json()).alerts || [];
+        },
+
+        async loadAlertCount() {
+            try {
+                const res = await fetch('/api/alerts?unread_only=true&limit=100');
+                const data = await res.json();
+                this.unreadAlerts = (data.alerts || []).length;
+            } catch(e) {}
+        },
+
+        async saveCurrentAsWatch() {
+            const name = prompt('Watch name:', `${this.search.make || 'All'} ${this.search.model || ''} watch`.trim());
+            if (!name) return;
+            await fetch('/api/watches', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    name,
+                    search_params: this.search,
+                    required_features: this.search.features,
+                }),
+            });
+            alert('Watch saved!');
+        },
+
+        async deleteWatch(id) {
+            if (!confirm('Delete this watch?')) return;
+            await fetch(`/api/watches/${id}`, {method: 'DELETE'});
+            this.loadWatches();
+        },
+
+        async markAllRead() {
+            await fetch('/api/alerts/read', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({}),
+            });
+            this.unreadAlerts = 0;
+            this.loadWatches();
+        },
+
+        async loadStats() {
+            const [statsRes, dropsRes] = await Promise.all([
+                fetch('/api/stats'),
+                fetch('/api/price-drops?limit=10'),
+            ]);
+            this.stats = await statsRes.json();
+            const drops = await dropsRes.json();
+
+            this.$nextTick(() => {
+                this.renderScoreChart();
+                this.renderMakesChart();
+                this.renderPriceDrops(drops.drops || []);
+            });
+        },
+
+        renderScoreChart() {
+            const ctx = document.getElementById('scoreChart');
+            if (!ctx) return;
+            const d = this.stats.score_distribution || {};
+            if (Chart.getChart(ctx)) Chart.getChart(ctx).destroy();
+            new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Exceptional (80+)', 'Great (65-79)', 'Good (50-64)', 'Fair (35-49)', 'Below (0-34)'],
+                    datasets: [{
+                        data: [d.exceptional, d.great, d.good, d.fair, d.below],
+                        backgroundColor: ['#0a6b2e', '#2e7d32', '#558b2f', '#f9a825', '#c62828'],
+                    }]
+                },
+                options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } } },
+            });
+        },
+
+        renderMakesChart() {
+            const ctx = document.getElementById('makesChart');
+            if (!ctx) return;
+            const makes = (this.stats.makes || []).slice(0, 10);
+            if (Chart.getChart(ctx)) Chart.getChart(ctx).destroy();
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: makes.map(m => m.make),
+                    datasets: [{
+                        label: 'Listings',
+                        data: makes.map(m => m.count),
+                        backgroundColor: '#3b82f6',
+                    }]
+                },
+                options: { responsive: true, indexAxis: 'y', plugins: { legend: { display: false } } },
+            });
+        },
+
+        renderPriceDrops(drops) {
+            const el = document.getElementById('priceDropsList');
+            if (!el) return;
+            if (!drops.length) { el.innerHTML = '<p class="text-gray-400 text-sm py-4 text-center">No price drops recorded yet</p>'; return; }
+            el.innerHTML = drops.map(d => `
+                <div class="flex justify-between items-center py-2 border-b text-sm">
+                    <a href="${d.url}" target="_blank" class="text-blue-600 hover:underline truncate max-w-md">${d.title}</a>
+                    <span class="text-green-600 font-semibold whitespace-nowrap ml-4">-£${d.total_drop.toLocaleString()}</span>
+                </div>`).join('');
+        },
+
+        scoreClass(score) {
+            if (!score) return 'bg-gray-300';
+            if (score >= 80) return 'bg-exceptional';
+            if (score >= 65) return 'bg-great';
+            if (score >= 50) return 'bg-good';
+            if (score >= 35) return 'bg-fair';
+            return 'bg-below';
+        },
+
+        atRatingClass(rating) {
+            if (!rating) return '';
+            const r = rating.toLowerCase();
+            if (r.includes('great') || r.includes('low')) return 'bg-green-100 text-green-800';
+            if (r.includes('good')) return 'bg-emerald-50 text-emerald-700';
+            if (r.includes('fair')) return 'bg-amber-50 text-amber-700';
+            return 'bg-red-50 text-red-700';
+        },
+    };
+}
+</script>
+</body>
+</html>

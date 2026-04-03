@@ -97,12 +97,12 @@ def search(postcode, make, model, year_from, year_to, price_from, price_to,
 @click.option("--make", default=None, help="Filter by make.")
 @click.option("--model", default=None, help="Filter by model.")
 def process(make, model):
-    """Normalise features, compute market stats, and score all listings."""
+    """Normalise features (with text mining + trim inference), compute market stats, and score."""
     from autotrader.processing.market import compute_market_stats
     from autotrader.processing.normaliser import normalise_all_listings
     from autotrader.processing.scorer import score_all_listings
 
-    click.echo("Step 1/3: Normalising features...")
+    click.echo("Step 1/3: Normalising features (structured + text mining + trim inference)...")
     n = normalise_all_listings(make, model)
     click.echo(f"  Normalised features for {n} listings.")
 
@@ -213,6 +213,105 @@ def stats():
         click.echo(f"\nTop makes:")
         for row in makes:
             click.echo(f"  {row[0] or 'Unknown'}: {row[1]} listings")
+
+
+@cli.command()
+@click.option("--name", required=True, help="Name for this watch.")
+@click.option("--make", default=None, help="Filter by make.")
+@click.option("--model", default=None, help="Filter by model.")
+@click.option("--year-from", type=int, default=None, help="Minimum year.")
+@click.option("--year-to", type=int, default=None, help="Maximum year.")
+@click.option("--price-to", type=int, default=None, help="Maximum price.")
+@click.option("--min-score", type=int, default=None, help="Minimum deal score to alert on.")
+@click.option("--features", multiple=True, help="Required features.")
+def watch(name, make, model, year_from, year_to, price_to, min_score, features):
+    """Save a search as a watch for price monitoring."""
+    from autotrader.monitoring import save_watch
+
+    params = {k: v for k, v in {
+        "make": make, "model": model,
+        "year_from": year_from, "year_to": year_to,
+        "price_to": price_to,
+    }.items() if v is not None}
+
+    save_watch(
+        name=name,
+        search_params=params,
+        min_score=min_score,
+        max_price=price_to,
+        required_features=list(features) if features else None,
+    )
+    click.echo(f"Watch '{name}' saved. Run 'autotrader monitor' to start checking.")
+
+
+@cli.command()
+@click.option("--interval", type=int, default=30, help="Check interval in minutes.")
+def monitor(interval):
+    """Run monitoring loop - checks watches and generates alerts."""
+    from autotrader.monitoring import monitor_loop
+    click.echo(f"Starting monitor (checking every {interval} minutes)...")
+    click.echo("Press Ctrl+C to stop.\n")
+    asyncio.run(monitor_loop(interval_minutes=interval))
+
+
+@cli.command()
+def watches():
+    """List saved watches and recent alerts."""
+    from autotrader.monitoring import get_alerts, list_watches
+
+    watch_list = list_watches()
+    if not watch_list:
+        click.echo("No watches saved. Use 'autotrader watch' to create one.")
+        return
+
+    click.echo(f"\nSaved Watches ({len(watch_list)}):")
+    for w in watch_list:
+        status = "active" if w.get("active") else "paused"
+        click.echo(f"  [{w['id']}] {w['name']} ({status}) - last checked: {w.get('last_checked', 'never')}")
+
+    alerts = get_alerts(limit=10, unread_only=True)
+    if alerts:
+        click.echo(f"\nUnread Alerts ({len(alerts)}):")
+        for a in alerts:
+            icon = "!" if a["alert_type"] == "price_drop" else "*"
+            click.echo(f"  {icon} {a['message']}")
+
+
+@cli.command()
+@click.option("--make", default=None, help="Filter by make.")
+@click.option("--model", default=None, help="Filter by model.")
+@click.option("--max-checks", type=int, default=10, help="Max listings to check.")
+def mot_check(make, model, max_checks):
+    """Check MOT history for listings (requires DVLA_MOT_API_KEY env var)."""
+    import os
+    if not os.environ.get("DVLA_MOT_API_KEY"):
+        click.echo("Error: Set DVLA_MOT_API_KEY environment variable first.")
+        click.echo("Get a free key from: https://dvsa.github.io/mot-history-api-documentation/")
+        return
+
+    from autotrader.processing.mot import check_mot_for_listing
+    from autotrader.storage.database import get_all_listings_for_scoring
+
+    listings = get_all_listings_for_scoring(make, model)
+    listings = [l for l in listings if not l.get("mot_data")][:max_checks]
+
+    if not listings:
+        click.echo("No listings need MOT checking.")
+        return
+
+    click.echo(f"Checking MOT history for {len(listings)} listings...")
+
+    async def _run():
+        checked = 0
+        for l in listings:
+            result = await check_mot_for_listing(l)
+            if result:
+                checked += 1
+                rate = result.get("mot_pass_rate")
+                click.echo(f"  {l['title'][:40]}: {result['total_mot_tests']} tests, {rate}% pass rate")
+        click.echo(f"\nChecked {checked} listings.")
+
+    asyncio.run(_run())
 
 
 def main():

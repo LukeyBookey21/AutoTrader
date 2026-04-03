@@ -61,6 +61,15 @@ SPEC_UPLIFT = {
     "auto_parking": 250,
 }
 
+# Proxy settings
+# Comma-separated list of proxy URLs, e.g. "http://proxy1:8080,http://proxy2:8080"
+# Or a single proxy URL. Supports http, https, socks5 protocols.
+PROXY_LIST = [
+    p.strip() for p in os.environ.get("AUTOTRADER_PROXIES", "").split(",") if p.strip()
+]
+PROXY_USERNAME = os.environ.get("AUTOTRADER_PROXY_USER", "")
+PROXY_PASSWORD = os.environ.get("AUTOTRADER_PROXY_PASS", "")
+
 # Average annual mileage for UK cars (used in scoring)
 AVERAGE_ANNUAL_MILEAGE = 8000
 

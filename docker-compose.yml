@@ -1,0 +1,20 @@
+services:
+  autotrader:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - autotrader-data:/app/data
+    environment:
+      - AUTOTRADER_DB_PATH=/app/data/autotrader.db
+      - AUTOTRADER_HEADLESS=true
+      - AUTOTRADER_DELAY=3.0
+      # Uncomment and set for MOT checks:
+      # - DVLA_MOT_API_KEY=your_key_here
+      # Uncomment and set for proxy rotation:
+      # - AUTOTRADER_PROXIES=http://proxy1:8080,http://proxy2:8080
+      # - AUTOTRADER_PROXY_USER=username
+      # - AUTOTRADER_PROXY_PASS=password
+
+volumes:
+  autotrader-data:

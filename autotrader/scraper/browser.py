@@ -63,11 +63,29 @@ async def get_browser_context() -> BrowserContext:
 
     proxy = _get_next_proxy()
 
-    _browser = await _playwright.chromium.launch(
+    # Try to find an available Chromium binary
+    import glob
+    executable_path = None
+    for pattern in [
+        "/opt/pw-browsers/chromium-*/chrome-linux/chrome",
+        "/opt/pw-browsers/chromium/chrome-linux/chrome",
+        "/usr/bin/chromium-browser",
+        "/usr/bin/google-chrome",
+    ]:
+        matches = glob.glob(pattern)
+        if matches:
+            executable_path = matches[0]
+            break
+
+    launch_kwargs = dict(
         headless=HEADLESS,
         args=launch_args,
         proxy=proxy,
     )
+    if executable_path:
+        launch_kwargs["executable_path"] = executable_path
+
+    _browser = await _playwright.chromium.launch(**launch_kwargs)
 
     _context = await _browser.new_context(
         viewport={"width": 1920, "height": 1080},

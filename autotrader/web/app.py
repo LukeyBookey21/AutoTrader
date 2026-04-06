@@ -23,7 +23,21 @@ from autotrader.processing.price_history import (
     get_price_drops,
     get_price_history,
 )
-from autotrader.storage.database import get_db, get_listing, init_db, search_listings
+from autotrader.storage.database import (
+    add_to_shortlist,
+    find_similar_listings,
+    get_db,
+    get_freshness_data,
+    get_listing,
+    get_listing_images,
+    get_new_listings,
+    get_shortlist,
+    get_top_deals,
+    init_db,
+    is_shortlisted,
+    remove_from_shortlist,
+    search_listings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -241,6 +255,112 @@ async def api_compare(ids: list[str] = Query(default=[])):
         if listing:
             listings.append(listing)
     return {"listings": listings}
+
+
+# ---------- API: Dashboard ----------
+
+@app.get("/api/dashboard")
+async def api_dashboard():
+    """Get dashboard data - top deals, recent listings, freshness, price drops."""
+    from autotrader.processing.price_history import get_price_drops
+
+    freshness = get_freshness_data()
+    top_deals = get_top_deals(limit=10)
+    new_listings = get_new_listings(hours=48, limit=10)
+    drops = get_price_drops(min_drop=100, limit=10)
+    unread_alerts = get_alerts(limit=100, unread_only=True)
+
+    return {
+        "freshness": freshness,
+        "top_deals": top_deals,
+        "new_listings": new_listings,
+        "price_drops": drops,
+        "unread_alert_count": len(unread_alerts),
+    }
+
+
+# ---------- API: Shortlist ----------
+
+@app.get("/api/shortlist")
+async def api_get_shortlist():
+    """Get all shortlisted listings."""
+    return {"listings": get_shortlist()}
+
+
+@app.post("/api/shortlist/{listing_id}")
+async def api_add_shortlist(listing_id: str, request: Request):
+    """Add a listing to the shortlist."""
+    body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    add_to_shortlist(listing_id, body.get("notes", ""))
+    return {"status": "added"}
+
+
+@app.delete("/api/shortlist/{listing_id}")
+async def api_remove_shortlist(listing_id: str):
+    """Remove a listing from the shortlist."""
+    remove_from_shortlist(listing_id)
+    return {"status": "removed"}
+
+
+# ---------- API: Images ----------
+
+@app.get("/api/images/{listing_id}")
+async def api_listing_images(listing_id: str):
+    """Get image URLs for a listing."""
+    images = get_listing_images(listing_id)
+    return {"listing_id": listing_id, "images": images}
+
+
+# ---------- API: Similar Listings ----------
+
+@app.get("/api/similar/{listing_id}")
+async def api_similar(listing_id: str, limit: int = Query(default=10)):
+    """Find similar but cheaper listings."""
+    similar = find_similar_listings(listing_id, limit=limit)
+    return {"listing_id": listing_id, "similar": similar}
+
+
+# ---------- API: Valuation ----------
+
+@app.get("/api/valuate")
+async def api_valuate(
+    make: str = Query(required=True),
+    model: str = Query(required=True),
+    year: int = Query(required=True),
+    mileage: int = Query(required=True),
+    seller_type: str = Query(default="trade"),
+):
+    """Calculate market valuation from scraped data."""
+    from autotrader.processing.valuation import calculate_valuation
+    result = calculate_valuation(make, model, year, mileage, seller_type=seller_type)
+    return result
+
+
+# ---------- API: Depreciation ----------
+
+@app.get("/api/depreciation/{listing_id}")
+async def api_depreciation(listing_id: str):
+    """Get depreciation prediction for a listing."""
+    from autotrader.processing.depreciation import predict_depreciation
+    result = predict_depreciation(listing_id=listing_id)
+    return result
+
+
+@app.get("/api/depreciation")
+async def api_depreciation_manual(
+    make: str = Query(required=True),
+    model: str = Query(required=True),
+    year: int = Query(required=True),
+    price: int = Query(required=True),
+    mileage: int | None = Query(default=None),
+):
+    """Get depreciation prediction from manual input."""
+    from autotrader.processing.depreciation import predict_depreciation
+    result = predict_depreciation(
+        current_price=price, make=make, model=model,
+        year=year, mileage=mileage,
+    )
+    return result
 
 
 # ---------- Export ----------

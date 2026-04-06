@@ -158,6 +158,25 @@ def init_db():
             );
             CREATE INDEX IF NOT EXISTS idx_alerts_unread
                 ON alerts(read, created_at);
+
+            -- Shortlist / favourites
+            CREATE TABLE IF NOT EXISTS shortlist (
+                listing_id TEXT PRIMARY KEY,
+                notes TEXT DEFAULT '',
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (listing_id) REFERENCES listings(id)
+            );
+
+            -- Image URLs
+            CREATE TABLE IF NOT EXISTS listing_images (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                listing_id TEXT NOT NULL,
+                image_url TEXT NOT NULL,
+                position INTEGER DEFAULT 0,
+                FOREIGN KEY (listing_id) REFERENCES listings(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_listing_images_listing
+                ON listing_images(listing_id);
         """)
 
         # Safe column additions (ignore if already exists)
@@ -404,6 +423,149 @@ def update_listing_normalised_features(listing_id: str, features: list[str]):
             "UPDATE listings SET features_normalised = ? WHERE id = ?",
             (json.dumps(features), listing_id),
         )
+
+
+def add_to_shortlist(listing_id: str, notes: str = ""):
+    """Add a listing to the shortlist."""
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO shortlist (listing_id, notes) VALUES (?, ?)",
+            (listing_id, notes),
+        )
+
+
+def remove_from_shortlist(listing_id: str):
+    """Remove a listing from the shortlist."""
+    with get_db() as conn:
+        conn.execute("DELETE FROM shortlist WHERE listing_id = ?", (listing_id,))
+
+
+def get_shortlist() -> list[dict]:
+    """Get all shortlisted listings with full data."""
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT l.*, s.notes as shortlist_notes, s.added_at as shortlisted_at
+               FROM shortlist s
+               JOIN listings l ON l.id = s.listing_id
+               ORDER BY s.added_at DESC"""
+        ).fetchall()
+        return [_row_to_dict(row) for row in rows]
+
+
+def is_shortlisted(listing_id: str) -> bool:
+    """Check if a listing is shortlisted."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM shortlist WHERE listing_id = ?", (listing_id,)
+        ).fetchone()
+        return row is not None
+
+
+def save_listing_images(listing_id: str, image_urls: list[str]):
+    """Save image URLs for a listing."""
+    with get_db() as conn:
+        conn.execute("DELETE FROM listing_images WHERE listing_id = ?", (listing_id,))
+        for i, url in enumerate(image_urls):
+            conn.execute(
+                "INSERT INTO listing_images (listing_id, image_url, position) VALUES (?, ?, ?)",
+                (listing_id, url, i),
+            )
+
+
+def get_listing_images(listing_id: str) -> list[str]:
+    """Get image URLs for a listing."""
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT image_url FROM listing_images WHERE listing_id = ? ORDER BY position",
+            (listing_id,),
+        ).fetchall()
+        return [row[0] for row in rows]
+
+
+def find_similar_listings(listing_id: str, limit: int = 10) -> list[dict]:
+    """Find similar but cheaper listings for comparison."""
+    listing = get_listing(listing_id)
+    if not listing or not listing.get("price"):
+        return []
+
+    conditions = ["id != ?", "price IS NOT NULL", "price < ?"]
+    params: list = [listing_id, listing["price"]]
+
+    if listing.get("make"):
+        conditions.append("LOWER(make) = LOWER(?)")
+        params.append(listing["make"])
+    if listing.get("model"):
+        conditions.append("LOWER(model) = LOWER(?)")
+        params.append(listing["model"])
+    if listing.get("year"):
+        conditions.append("year BETWEEN ? AND ?")
+        params.extend([listing["year"] - 2, listing["year"] + 2])
+
+    where = " AND ".join(conditions)
+    params.append(limit)
+
+    with get_db() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM listings WHERE {where} ORDER BY price ASC LIMIT ?",
+            params,
+        ).fetchall()
+        return [_row_to_dict(row) for row in rows]
+
+
+def get_freshness_data() -> dict:
+    """Get listing freshness statistics."""
+    with get_db() as conn:
+        # Newly appeared (first seen in last 24h)
+        new_24h = conn.execute(
+            """SELECT COUNT(*) FROM listings
+               WHERE first_seen >= datetime('now', '-1 day')"""
+        ).fetchone()[0]
+
+        # Stale (not scraped in 7+ days, likely sold)
+        stale = conn.execute(
+            """SELECT COUNT(*) FROM listings
+               WHERE scraped_at < datetime('now', '-7 days')"""
+        ).fetchone()[0]
+
+        # Recently re-scraped with price change
+        repriced = conn.execute(
+            """SELECT COUNT(*) FROM listings WHERE price_dropped = 1"""
+        ).fetchone()[0]
+
+        # Total active
+        total = conn.execute("SELECT COUNT(*) FROM listings").fetchone()[0]
+
+        return {
+            "new_24h": new_24h,
+            "stale_7d": stale,
+            "repriced": repriced,
+            "total": total,
+            "active": total - stale,
+        }
+
+
+def get_new_listings(hours: int = 24, limit: int = 20) -> list[dict]:
+    """Get listings first seen within the last N hours."""
+    with get_db() as conn:
+        rows = conn.execute(
+            f"""SELECT * FROM listings
+                WHERE first_seen >= datetime('now', '-{hours} hours')
+                ORDER BY first_seen DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [_row_to_dict(row) for row in rows]
+
+
+def get_top_deals(limit: int = 10) -> list[dict]:
+    """Get the highest-scoring deals."""
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT * FROM listings
+               WHERE deal_score IS NOT NULL
+               ORDER BY deal_score DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [_row_to_dict(row) for row in rows]
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:

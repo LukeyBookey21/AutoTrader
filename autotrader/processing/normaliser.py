@@ -106,8 +106,8 @@ FEATURE_PATTERNS: dict[str, list[str]] = {
         r"f(ront)?\s*/?\s*r(ear)?\s*park(ing)?\s*sens",
     ],
     "parking_sensors_rear": [
-        r"(?<!front\s*(and|&)\s*)rear\s*parking\s*sensors?",
-        r"parking\s*sensors?(?!\s*front)",
+        r"\brear\s*parking\s*sensors?",
+        r"parking\s*sensors?\s*rear",
         r"reverse\s*parking\s*sensors?",
     ],
     # Technology

@@ -246,12 +246,13 @@ def watch(name, make, model, year_from, year_to, price_to, min_score, features):
 
 @cli.command()
 @click.option("--interval", type=int, default=30, help="Check interval in minutes.")
-def monitor(interval):
+@click.option("--auto-scrape/--no-scrape", default=False, help="Auto-scrape AutoTrader for each watch.")
+def monitor(interval, auto_scrape):
     """Run monitoring loop - checks watches and generates alerts."""
     from autotrader.monitoring import monitor_loop
-    click.echo(f"Starting monitor (checking every {interval} minutes)...")
+    click.echo(f"Starting monitor (checking every {interval} minutes, auto-scrape: {auto_scrape})...")
     click.echo("Press Ctrl+C to stop.\n")
-    asyncio.run(monitor_loop(interval_minutes=interval))
+    asyncio.run(monitor_loop(interval_minutes=interval, auto_scrape=auto_scrape))
 
 
 @cli.command()
@@ -312,6 +313,75 @@ def mot_check(make, model, max_checks):
         click.echo(f"\nChecked {checked} listings.")
 
     asyncio.run(_run())
+
+
+@cli.command()
+@click.option("--make", required=True, help="Vehicle make.")
+@click.option("--model", required=True, help="Vehicle model.")
+@click.option("--year", type=int, required=True, help="Registration year.")
+@click.option("--mileage", type=int, required=True, help="Current mileage.")
+@click.option("--features", multiple=True, help="Normalised feature keys.")
+@click.option("--seller-type", default="trade", help="trade or private.")
+def valuate(make, model, year, mileage, features, seller_type):
+    """Calculate estimated market value from scraped data."""
+    from autotrader.processing.valuation import calculate_valuation
+
+    result = calculate_valuation(
+        make=make, model=model, year=year, mileage=mileage,
+        features=list(features) if features else None,
+        seller_type=seller_type,
+    )
+
+    if "error" in result:
+        click.echo(f"Error: {result['error']}")
+        return
+
+    click.echo(f"\nValuation: {make} {model} ({year}, {mileage:,} miles)")
+    click.echo(f"  Estimated value: £{result['estimated_value']:,}")
+    click.echo(f"  Range: £{result['value_range']['low']:,} - £{result['value_range']['high']:,}")
+    click.echo(f"  Confidence: {result['confidence']} ({result['sample_count']} comparables)")
+    b = result["breakdown"]
+    click.echo(f"\n  Breakdown:")
+    click.echo(f"    Base market price: £{b['base_market_price']:,}")
+    click.echo(f"    Mileage adjustment: £{b['mileage_adjustment']:+,}")
+    click.echo(f"    Spec uplift: £{b['spec_uplift']:+,}")
+    click.echo(f"    Seller adjustment: £{b['seller_adjustment']:+,}")
+
+
+@cli.command()
+@click.option("--make", required=True, help="Vehicle make.")
+@click.option("--model", required=True, help="Vehicle model.")
+@click.option("--year", type=int, required=True, help="Registration year.")
+@click.option("--price", type=int, required=True, help="Current price.")
+@click.option("--mileage", type=int, default=None, help="Current mileage.")
+def depreciation(make, model, year, price, mileage):
+    """Predict future depreciation for a vehicle."""
+    from autotrader.processing.depreciation import predict_depreciation
+
+    result = predict_depreciation(
+        current_price=price, make=make, model=model,
+        year=year, mileage=mileage,
+        months_ahead=[3, 6, 12, 24],
+    )
+
+    if "error" in result:
+        click.echo(f"Error: {result['error']}")
+        return
+
+    click.echo(f"\nDepreciation Forecast: {make} {model} ({year})")
+    click.echo(f"  Current price: £{price:,}")
+    click.echo(f"  Depreciation rate: ~{result['depreciation_rate_used']}%/year")
+    click.echo(f"  Confidence: {result['confidence']}")
+    click.echo(f"\n  {'Months':>8} {'Predicted':>12} {'Drop':>10} {'Drop%':>8} {'Monthly Cost':>13}")
+    click.echo(f"  {'-'*55}")
+    for p in result["predictions"]:
+        click.echo(
+            f"  {p['months']:>8} "
+            f"£{p['predicted_price']:>10,} "
+            f"£{p['depreciation_amount']:>8,} "
+            f"{p['depreciation_percent']:>7.1f}% "
+            f"£{p['monthly_cost']:>11,.0f}/mo"
+        )
 
 
 def main():

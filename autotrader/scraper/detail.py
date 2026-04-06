@@ -142,8 +142,17 @@ def _parse_detail_from_next_data(data: dict) -> dict | None:
         if not isinstance(seller, dict):
             seller = {}
 
-        # Images
+        # Images - extract URLs for gallery
         images = advert.get("images", []) or advert.get("imageUrls", [])
+        image_urls = []
+        if isinstance(images, list):
+            for img in images:
+                if isinstance(img, str):
+                    image_urls.append(img)
+                elif isinstance(img, dict):
+                    url = img.get("url") or img.get("src") or img.get("href") or ""
+                    if url:
+                        image_urls.append(url)
 
         # Mileage
         mileage = (
@@ -180,6 +189,7 @@ def _parse_detail_from_next_data(data: dict) -> dict | None:
             "price_dropped": 1 if price_dropped else 0,
             "price_drop_amount": price_drop_amount,
             "features_raw": features_raw,
+            "image_urls": image_urls,
             "detail_scraped": 1,
         }
     except Exception as e:
@@ -292,9 +302,17 @@ async def scrape_listing_detail(listing_id: str) -> dict | None:
             detail["url"] = url
             detail["scraped_at"] = datetime.now(timezone.utc).isoformat()
 
+            # Extract image_urls before saving (not a DB column)
+            image_urls = detail.pop("image_urls", [])
+
             # Save to database
             with get_db() as conn:
                 upsert_listing(conn, detail)
+
+            # Save images separately
+            if image_urls:
+                from autotrader.storage.database import save_listing_images
+                save_listing_images(listing_id, image_urls)
 
             # Record price snapshot for history
             if detail.get("price"):

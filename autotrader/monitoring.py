@@ -210,16 +210,68 @@ async def run_all_watches() -> list[dict]:
     return all_alerts
 
 
-async def monitor_loop(interval_minutes: int = 30):
-    """Run monitoring in a loop. For use with the CLI 'monitor' command."""
-    logger.info(f"Starting monitoring loop (interval: {interval_minutes}min)")
+async def auto_scrape_watch(watch: dict):
+    """Re-scrape AutoTrader for a watch's search parameters.
+
+    This triggers an actual live scrape to find new listings,
+    then processes them for scoring.
+    """
+    params = watch["search_params"]
+    if not params.get("postcode"):
+        logger.debug(f"Watch '{watch['name']}' has no postcode, skipping auto-scrape")
+        return
+
+    try:
+        from autotrader.scraper.browser import close_browser
+        from autotrader.scraper.detail import scrape_listing_details_batch
+        from autotrader.scraper.search import scrape_search
+
+        logger.info(f"Auto-scraping for watch: {watch['name']}")
+        listings = await scrape_search(params, max_pages=3)
+        logger.info(f"  Found {len(listings)} listings")
+
+        if listings:
+            ids = [l["id"] for l in listings]
+            await scrape_listing_details_batch(ids, max_listings=20)
+
+            # Process the results
+            from autotrader.processing.market import compute_market_stats
+            from autotrader.processing.normaliser import normalise_all_listings
+            from autotrader.processing.scorer import score_all_listings
+
+            normalise_all_listings(params.get("make"), params.get("model"))
+            compute_market_stats(params.get("make"), params.get("model"))
+            score_all_listings(params.get("make"), params.get("model"))
+
+    except Exception as e:
+        logger.error(f"Auto-scrape failed for watch '{watch['name']}': {e}")
+
+
+async def monitor_loop(interval_minutes: int = 30, auto_scrape: bool = False):
+    """Run monitoring in a loop. For use with the CLI 'monitor' command.
+
+    Args:
+        interval_minutes: How often to check.
+        auto_scrape: If True, re-scrape AutoTrader before checking.
+    """
+    from autotrader.notifications import notify_alerts
+
+    logger.info(f"Starting monitoring loop (interval: {interval_minutes}min, auto_scrape: {auto_scrape})")
     while True:
         try:
+            if auto_scrape:
+                watches = list_watches()
+                active = [w for w in watches if w.get("active")]
+                for watch in active:
+                    await auto_scrape_watch(watch)
+
             alerts = await run_all_watches()
             if alerts:
                 print(f"\n[{datetime.now().strftime('%H:%M')}] {len(alerts)} new alerts:")
                 for alert in alerts:
                     print(f"  {alert['type']}: {alert['message']}")
+                # Send notifications
+                notify_alerts(alerts)
             else:
                 print(f"[{datetime.now().strftime('%H:%M')}] No new alerts.")
         except Exception as e:
